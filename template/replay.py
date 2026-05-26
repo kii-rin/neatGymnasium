@@ -3,9 +3,9 @@ import gymnasium as gym
 import neat
 
 
-env_name = "CartPole-v1"
-config_path = "/Users/kiirin/Desktop/neat/cartpole/config-feedforward"
-winner_path = "/Users/kiirin/Desktop/neat/cartpole/winner-feedforward"
+env_name = "LunarLander-v3"
+config_path = "/Users/kiirin/Desktop/neat/lunarLander/config-feedforward"
+winner_path = "/Users/kiirin/Desktop/neat/lunarLander/winner-feedforward"
 
 
 def shape(output):

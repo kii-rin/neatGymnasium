@@ -1,13 +1,13 @@
 import multiprocessing
 import os
 import pickle
-
 import gymnasium as gym
 import neat
 
 
-env_name = "CartPole-v1"
+env_name = "LunarLander-v3"
 runs_per_genome = 5
+resume_path = ""  # Optional
 
 
 def shape(output):
@@ -55,14 +55,22 @@ def run():
         config_path,
     )
 
-    pop = neat.Population(config)
+    if resume_path:
+        pop = neat.Checkpointer.restore_checkpoint(resume_path)
+    else:
+        pop = neat.Population(config)
+
     pop.add_reporter(neat.StatisticsReporter())
     pop.add_reporter(neat.StdOutReporter(True))
+    pop.add_reporter(neat.Checkpointer(
+        generation_interval=50,
+        filename_prefix=os.path.join(local_dir, 'checkpoint-'),
+    ))
 
     pe = neat.ParallelEvaluator(multiprocessing.cpu_count(), eval_genome)
     winner = pop.run(pe.evaluate)
 
-    with open('winner-feedforward', 'wb') as f:
+    with open(os.path.join(local_dir, 'winner-feedforward'), 'wb') as f:
         pickle.dump(winner, f)
 
     print(winner)
