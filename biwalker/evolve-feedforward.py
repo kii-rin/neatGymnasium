@@ -5,9 +5,9 @@ import gymnasium as gym
 import neat
 
 
-env_name = "CartPole-v1"
-runs_per_genome = 5
-resume_path = ""  # set to checkpoint path to resume
+env_name = "BipedalWalker-v3"
+runs_per_genome = 3
+resume_path = ""  # Optional
 
 
 def shape(output):
@@ -15,18 +15,20 @@ def shape(output):
     # return 0 if output[0] < 0.5 else 1
 
     # discrete, N actions      | num_outputs=N, sigmoid or tanh
-    return output.index(max(output))
+    # return output.index(max(output))
 
-    # continuous, 1 action     | num_outputs=1, tanh
+    # continuous, scaled       | num_outputs=1, tanh
     # return [output[0] * 2.0]
 
     # continuous, N actions    | num_outputs=N, tanh range [-1, 1]
-    # return list(output)
+    return list(output)
+
 
 
 def eval_genome(genome, config):
     net = neat.nn.FeedForwardNetwork.create(genome, config)
     env = gym.make(env_name)
+
     fitnesses = []
     for _ in range(runs_per_genome):
         obs, _ = env.reset()
@@ -38,6 +40,7 @@ def eval_genome(genome, config):
             obs, reward, terminated, truncated, _ = env.step(action)
             fitness += reward
         fitnesses.append(fitness)
+
     env.close()
     return min(fitnesses)
 
@@ -55,20 +58,25 @@ def run():
         neat.DefaultSpeciesSet, neat.DefaultStagnation,
         config_path,
     )
+
     if resume_path:
         pop = neat.Checkpointer.restore_checkpoint(resume_path)
     else:
         pop = neat.Population(config)
+
     pop.add_reporter(neat.StatisticsReporter())
     pop.add_reporter(neat.StdOutReporter(True))
     pop.add_reporter(neat.Checkpointer(
-        generation_interval=10,
+        generation_interval=20,
         filename_prefix=os.path.join(local_dir, 'checkpoint-'),
     ))
+
     pe = neat.ParallelEvaluator(multiprocessing.cpu_count(), eval_genome)
     winner = pop.run(pe.evaluate)
+
     with open(os.path.join(local_dir, 'winner-feedforward'), 'wb') as f:
         pickle.dump(winner, f)
+
     print(winner)
 
 
