@@ -1,0 +1,12 @@
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.env
+
+checkpoint-*
+winner-feedforward
+*.pkl
+*.pickle
+
+.DS_Store
