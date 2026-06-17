@@ -8,5 +8,7 @@ checkpoint-*
 winner-feedforward
 *.pkl
 *.pickle
+videos/
+*.mp4
 
 .DS_Store
