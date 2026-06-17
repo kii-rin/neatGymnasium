@@ -6,6 +6,8 @@ import neat
 
 
 env_name = "BipedalWalker-v3"
+render_mode = None
+episodes = 1
 
 
 def shape(output):
@@ -29,19 +31,22 @@ def main():
         winner = pickle.load(f)
 
     net = neat.nn.FeedForwardNetwork.create(winner, config)
-    env = gym.make(env_name, render_mode="human")
+    env = gym.make(env_name, render_mode=render_mode)
 
-    obs, _ = env.reset()
-    terminated = truncated = False
-    total_reward = 0.0
+    try:
+        for episode in range(1, episodes + 1):
+            obs, _ = env.reset()
+            terminated = truncated = False
+            total_reward = 0.0
 
-    while not (terminated or truncated):
-        action = shape(net.activate(obs))
-        obs, reward, terminated, truncated, _ = env.step(action)
-        total_reward += reward
+            while not (terminated or truncated):
+                action = shape(net.activate(obs))
+                obs, reward, terminated, truncated, _ = env.step(action)
+                total_reward += reward
 
-    print("Replay total reward:", total_reward)
-    env.close()
+            print(f"Episode {episode} total reward: {total_reward}")
+    finally:
+        env.close()
 
 
 if __name__ == "__main__":
