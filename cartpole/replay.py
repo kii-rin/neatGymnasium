@@ -1,3 +1,4 @@
+import argparse
 import os
 import pickle
 
@@ -12,28 +13,52 @@ def shape(output):
     return output.index(max(output))
 
 
-local_dir = os.path.dirname(__file__)
-config_path = os.path.join(local_dir, "config-feedforward")
-winner_path = os.path.join(local_dir, "winner-feedforward")
+def parse_args():
+    parser = argparse.ArgumentParser(description="Replay a trained CartPole winner.")
+    parser.add_argument("--episodes", type=int, default=1)
+    parser.add_argument(
+        "--render-mode",
+        choices=("none", "human", "rgb_array"),
+        default="none",
+        help="Use 'none' on headless servers. Use 'human' only with a display.",
+    )
+    return parser.parse_args()
 
-config = neat.Config(
-    neat.DefaultGenome, neat.DefaultReproduction,
-    neat.DefaultSpeciesSet, neat.DefaultStagnation,
-    config_path,
-)
 
-with open(winner_path, "rb") as f:
-    winner = pickle.load(f)
+def main():
+    args = parse_args()
+    local_dir = os.path.dirname(__file__)
+    config_path = os.path.join(local_dir, "config-feedforward")
+    winner_path = os.path.join(local_dir, "winner-feedforward")
 
-net = neat.nn.FeedForwardNetwork.create(winner, config)
-env = gym.make(env_name, render_mode="human")
+    config = neat.Config(
+        neat.DefaultGenome, neat.DefaultReproduction,
+        neat.DefaultSpeciesSet, neat.DefaultStagnation,
+        config_path,
+    )
 
-obs, _ = env.reset()
-terminated = truncated = False
-total_reward = 0.0
-while not (terminated or truncated):
-    obs, reward, terminated, truncated, _ = env.step(shape(net.activate(obs)))
-    total_reward += reward
+    with open(winner_path, "rb") as f:
+        winner = pickle.load(f)
 
-print("Replay total reward:", total_reward)
-env.close()
+    net = neat.nn.FeedForwardNetwork.create(winner, config)
+    render_mode = None if args.render_mode == "none" else args.render_mode
+    env = gym.make(env_name, render_mode=render_mode)
+
+    try:
+        for episode in range(1, args.episodes + 1):
+            obs, _ = env.reset()
+            terminated = truncated = False
+            total_reward = 0.0
+
+            while not (terminated or truncated):
+                action = shape(net.activate(obs))
+                obs, reward, terminated, truncated, _ = env.step(action)
+                total_reward += reward
+
+            print(f"Episode {episode} total reward: {total_reward}")
+    finally:
+        env.close()
+
+
+if __name__ == "__main__":
+    main()
