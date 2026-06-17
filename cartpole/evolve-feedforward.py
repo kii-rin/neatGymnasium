@@ -7,7 +7,25 @@ import neat
 
 env_name = "CartPole-v1"
 runs_per_genome = 5
-resume_path = ""  # Optional
+resume_path = None  # Optional manual override, e.g. "checkpoint-40"
+
+
+def find_latest_checkpoint(local_dir):
+    checkpoints = []
+    for filename in os.listdir(local_dir):
+        if not filename.startswith("checkpoint-"):
+            continue
+        try:
+            generation = int(filename.split("checkpoint-")[1])
+        except ValueError:
+            continue
+        checkpoints.append((generation, os.path.join(local_dir, filename)))
+
+    if not checkpoints:
+        return None
+
+    checkpoints.sort()
+    return checkpoints[-1][1]
 
 
 def shape(output):
@@ -49,15 +67,26 @@ def eval_genomes(genomes, config):
 def run():
     local_dir = os.path.dirname(__file__)
     config_path = os.path.join(local_dir, 'config-feedforward')
+    winner_path = os.path.join(local_dir, 'winner-feedforward')
+
+    if os.path.exists(winner_path):
+        raise RuntimeError(
+            f"winner-feedforward already exists at {winner_path}. "
+            "Delete it if you want to train again."
+        )
+
     config = neat.Config(
         neat.DefaultGenome, neat.DefaultReproduction,
         neat.DefaultSpeciesSet, neat.DefaultStagnation,
         config_path,
     )
 
-    if resume_path:
-        pop = neat.Checkpointer.restore_checkpoint(resume_path)
+    latest_checkpoint = resume_path or find_latest_checkpoint(local_dir)
+    if latest_checkpoint:
+        print(f"Resuming from checkpoint: {latest_checkpoint}")
+        pop = neat.Checkpointer.restore_checkpoint(latest_checkpoint)
     else:
+        print("No checkpoint found. Starting new population.")
         pop = neat.Population(config)
 
     pop.add_reporter(neat.StatisticsReporter())
@@ -70,7 +99,7 @@ def run():
     pe = neat.ParallelEvaluator(multiprocessing.cpu_count(), eval_genome)
     winner = pop.run(pe.evaluate)
 
-    with open(os.path.join(local_dir, 'winner-feedforward'), 'wb') as f:
+    with open(winner_path, 'wb') as f:
         pickle.dump(winner, f)
 
     print(winner)
