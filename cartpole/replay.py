@@ -4,10 +4,10 @@ import pickle
 
 import gymnasium as gym
 import neat
+from gymnasium.wrappers import RecordVideo
 
 
 env_name = "CartPole-v1"
-render_mode = None
 
 
 def shape(output):
@@ -34,9 +34,18 @@ def load_genome(local_dir):
     return best
 
 
+def choose_mode():
+    choice = input("Replay mode? [human/cli]: ").strip().lower()
+    if choice in ("h", "human"):
+        return "human"
+    return "cli"
+
+
 def main():
     local_dir = os.path.dirname(__file__)
     config_path = os.path.join(local_dir, "config-feedforward")
+    mode = choose_mode()
+
     config = neat.Config(
         neat.DefaultGenome,
         neat.DefaultReproduction,
@@ -45,7 +54,14 @@ def main():
         config_path,
     )
     net = neat.nn.FeedForwardNetwork.create(load_genome(local_dir), config)
-    env = gym.make(env_name, render_mode=render_mode)
+
+    if mode == "human":
+        env = gym.make(env_name, render_mode="human")
+    else:
+        output_dir = os.path.join(local_dir, "videos")
+        os.makedirs(output_dir, exist_ok=True)
+        env = gym.make(env_name, render_mode="rgb_array")
+        env = RecordVideo(env, video_folder=output_dir, name_prefix="cartpole")
 
     obs, _ = env.reset()
     terminated = truncated = False
@@ -55,6 +71,8 @@ def main():
         total_reward += reward
 
     print("Replay total reward:", total_reward)
+    if mode == "cli":
+        print("Recorded video in:", os.path.join(local_dir, "videos"))
     env.close()
 
 
