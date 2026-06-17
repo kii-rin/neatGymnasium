@@ -1,32 +1,48 @@
+import os
 import pickle
+
 import gymnasium as gym
 import neat
 
 
-env_name = "LunarLander-v3"
-config_path = "/Users/kiirin/Desktop/neat/lunarLander/config-feedforward"
-winner_path = "/Users/kiirin/Desktop/neat/lunarLander/winner-feedforward"
+env_name = "BipedalWalker-v3"
 
 
 def shape(output):
-    return output.index(max(output))
+    return [max(-1.0, min(1.0, x)) for x in output]
 
 
-config = neat.Config(
-    neat.DefaultGenome, neat.DefaultReproduction,
-    neat.DefaultSpeciesSet, neat.DefaultStagnation,
-    config_path,
-)
+def main():
+    local_dir = os.path.dirname(__file__)
+    config_path = os.path.join(local_dir, "config-feedforward")
+    winner_path = os.path.join(local_dir, "winner-feedforward")
 
-with open(winner_path, 'rb') as f:
-    winner = pickle.load(f)
+    config = neat.Config(
+        neat.DefaultGenome,
+        neat.DefaultReproduction,
+        neat.DefaultSpeciesSet,
+        neat.DefaultStagnation,
+        config_path,
+    )
 
-net = neat.nn.FeedForwardNetwork.create(winner, config)
-env = gym.make(env_name, render_mode="human")
+    with open(winner_path, "rb") as f:
+        winner = pickle.load(f)
 
-obs, _ = env.reset()
-terminated = truncated = False
-while not (terminated or truncated):
-    obs, _, terminated, truncated, _ = env.step(shape(net.activate(obs)))
+    net = neat.nn.FeedForwardNetwork.create(winner, config)
+    env = gym.make(env_name, render_mode="human")
 
-env.close()
+    obs, _ = env.reset()
+    terminated = truncated = False
+    total_reward = 0.0
+
+    while not (terminated or truncated):
+        action = shape(net.activate(obs))
+        obs, reward, terminated, truncated, _ = env.step(action)
+        total_reward += reward
+
+    print("Replay total reward:", total_reward)
+    env.close()
+
+
+if __name__ == "__main__":
+    main()
