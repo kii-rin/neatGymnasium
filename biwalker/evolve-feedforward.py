@@ -7,22 +7,30 @@ import neat
 
 env_name = "BipedalWalker-v3"
 runs_per_genome = 3
-resume_path = ""  # Optional
+resume_path = None  # Optional manual override, e.g. "checkpoint-80"
+
+
+def find_latest_checkpoint(local_dir):
+    checkpoints = []
+    for filename in os.listdir(local_dir):
+        if not filename.startswith("checkpoint-"):
+            continue
+        try:
+            generation = int(filename.split("checkpoint-")[1])
+        except ValueError:
+            continue
+        checkpoints.append((generation, os.path.join(local_dir, filename)))
+
+    if not checkpoints:
+        return None
+
+    checkpoints.sort()
+    return checkpoints[-1][1]
 
 
 def shape(output):
-    # discrete, 2 actions      | num_outputs=1, sigmoid
-    # return 0 if output[0] < 0.5 else 1
-
-    # discrete, N actions      | num_outputs=N, sigmoid or tanh
-    # return output.index(max(output))
-
-    # continuous, scaled       | num_outputs=1, tanh
-    # return [output[0] * 2.0]
-
-    # continuous, N actions    | num_outputs=N, tanh range [-1, 1]
-    return list(output)
-
+    # continuous, N actions | num_outputs=N, tanh range [-1, 1]
+    return [max(-1.0, min(1.0, x)) for x in output]
 
 
 def eval_genome(genome, config):
@@ -53,15 +61,26 @@ def eval_genomes(genomes, config):
 def run():
     local_dir = os.path.dirname(__file__)
     config_path = os.path.join(local_dir, 'config-feedforward')
+    winner_path = os.path.join(local_dir, 'winner-feedforward')
+
+    if os.path.exists(winner_path):
+        raise RuntimeError(
+            f"winner-feedforward already exists at {winner_path}. "
+            "Delete it if you want to train again."
+        )
+
     config = neat.Config(
         neat.DefaultGenome, neat.DefaultReproduction,
         neat.DefaultSpeciesSet, neat.DefaultStagnation,
         config_path,
     )
 
-    if resume_path:
-        pop = neat.Checkpointer.restore_checkpoint(resume_path)
+    latest_checkpoint = resume_path or find_latest_checkpoint(local_dir)
+    if latest_checkpoint:
+        print(f"Resuming from checkpoint: {latest_checkpoint}")
+        pop = neat.Checkpointer.restore_checkpoint(latest_checkpoint)
     else:
+        print("No checkpoint found. Starting new population.")
         pop = neat.Population(config)
 
     pop.add_reporter(neat.StatisticsReporter())
@@ -71,10 +90,11 @@ def run():
         filename_prefix=os.path.join(local_dir, 'checkpoint-'),
     ))
 
-    pe = neat.ParallelEvaluator(multiprocessing.cpu_count(), eval_genome)
+    workers = max(1, multiprocessing.cpu_count() - 1)
+    pe = neat.ParallelEvaluator(workers, eval_genome)
     winner = pop.run(pe.evaluate)
 
-    with open(os.path.join(local_dir, 'winner-feedforward'), 'wb') as f:
+    with open(winner_path, 'wb') as f:
         pickle.dump(winner, f)
 
     print(winner)
