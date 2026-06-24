@@ -7,6 +7,7 @@ Included environments:
 - `CartPole-v1`
 - `LunarLander-v3`
 - `BipedalWalker-v3`
+- `BatGliderEnv` in `bat/`
 
 Each environment trains a feed-forward neural network policy with `neat-python`, saves checkpoints during training, and saves a final `winner-feedforward` when NEAT reaches the configured fitness threshold.
 
@@ -53,6 +54,26 @@ python3 evolve-feedforward.py
 
 Training automatically resumes from the highest numbered `checkpoint-*` when no `winner-feedforward` exists.
 
+### Train the bat glider
+
+```bash
+cd bat
+python3 evolve-feedforward.py
+```
+
+For a quick smoke run:
+
+```bash
+python3 evolve-feedforward.py --generations 1
+```
+
+The bat task combines the first two goals in one environment:
+
+1. Stay airborne and stable.
+2. Glide toward a forward waypoint.
+
+It uses 16 normalized inputs and 4 continuous outputs: left wing spread, right wing spread, tail pitch, and flap assist.
+
 ## Replay or record
 
 ```bash
@@ -73,6 +94,7 @@ Download videos from your local machine:
 
 ```bash
 scp -P YOUR_PORT 'root@YOUR_HOST:/root/neatGymnasium/biwalker/videos/*.mp4' .
+scp -P YOUR_PORT 'root@YOUR_HOST:/root/neatGymnasium/bat/videos/*.mp4' .
 ```
 
 ## Current config summary
@@ -82,8 +104,9 @@ scp -P YOUR_PORT 'root@YOUR_HOST:/root/neatGymnasium/biwalker/videos/*.mp4' .
 | `CartPole-v1` | 4 | 2 | Discrete | 100 | 475.0 |
 | `LunarLander-v3` | 8 | 4 | Discrete | 300 | 200.0 |
 | `BipedalWalker-v3` | 24 | 4 | Continuous | 300 | 300.0 |
+| `BatGliderEnv` | 16 | 4 | Continuous | 300 | 60.0 |
 
-CartPole stays at 100 because it is small and discrete. LunarLander and BipedalWalker use 300 to keep more diversity in harder spaces.
+CartPole stays at 100 because it is small and discrete. LunarLander, BipedalWalker, and BatGlider use 300 to keep more diversity in harder spaces.
 
 BipedalWalker currently uses:
 
@@ -94,7 +117,16 @@ max_stagnation = 25
 species_elitism = 2
 ```
 
-The lower compatibility threshold is meant to avoid collapsing into one species too quickly.
+BatGlider currently uses:
+
+```text
+pop_size = 300
+compatibility_threshold = 2.2
+max_stagnation = 25
+species_elitism = 2
+```
+
+The lower compatibility thresholds are meant to avoid collapsing into one species too quickly.
 
 Discrete actions use the index of the highest output:
 
@@ -102,7 +134,7 @@ Discrete actions use the index of the highest output:
 return output.index(max(output))
 ```
 
-BipedalWalker clips continuous actions to `[-1, 1]`:
+Continuous action environments clip outputs to `[-1, 1]`:
 
 ```python
 return [max(-1.0, min(1.0, x)) for x in output]
@@ -117,10 +149,19 @@ tmux new -s biwalker
 python3 evolve-feedforward.py
 ```
 
+For bat training:
+
+```bash
+tmux new -s bat
+cd bat
+python3 evolve-feedforward.py
+```
+
 Detach with `Ctrl+b`, then `d`. Reattach with:
 
 ```bash
 tmux attach -t biwalker
+tmux attach -t bat
 ```
 
 Plain SSH/tmux does not show GUI windows. Use `cli` replay mode to record videos instead.
@@ -136,6 +177,7 @@ Plain SSH/tmux does not show GUI windows. Use `cli` replay mode to record videos
 - Removed duplicate `record.py` scripts.
 - Refreshed `template/` scripts.
 - Retuned BipedalWalker config from 100 population / 3.0 threshold to 300 population / 2.0 threshold.
+- Added a simple bat-inspired glider environment with stage 1 survival and stage 2 waypoint rewards.
 
 ## TODO
 
@@ -144,6 +186,7 @@ Plain SSH/tmux does not show GUI windows. Use `cli` replay mode to record videos
 - Add a PPO or SAC baseline for comparison against NEAT.
 - Add CI checks for formatting and import errors.
 - Add a license file.
+- Add later bat stages: landing/perching, obstacles, wing damage, and stronger wind randomization.
 
 ## License
 
