@@ -7,6 +7,7 @@ Included environments:
 - `CartPole-v1`
 - `LunarLander-v3`
 - `BipedalWalker-v3`
+- custom `HummingbirdHoverEnv`
 
 Each environment trains a feed-forward neural network policy with `neat-python`, saves checkpoints during training, and saves a final `winner-feedforward` when NEAT reaches the configured fitness threshold.
 
@@ -75,6 +76,19 @@ Download videos from your local machine:
 scp -P YOUR_PORT 'root@YOUR_HOST:/root/neatGymnasium/biwalker/videos/*.mp4' .
 ```
 
+## Hummingbird hover
+
+The `flappy/` folder contains a lightweight Gymnasium implementation inspired by Purdue Flappy's thrust/torque interface, without its legacy DART and TensorFlow dependencies.
+
+```bash
+cd flappy
+python3 smoke_test.py
+python3 evolve-feedforward.py
+python3 replay.py
+```
+
+Replay records an MP4 of the simulated flight. See `flappy/README.md` for details.
+
 ## Current config summary
 
 | Environment | Inputs | Outputs | Action type | Population | Fitness threshold |
@@ -82,6 +96,7 @@ scp -P YOUR_PORT 'root@YOUR_HOST:/root/neatGymnasium/biwalker/videos/*.mp4' .
 | `CartPole-v1` | 4 | 2 | Discrete | 100 | 475.0 |
 | `LunarLander-v3` | 8 | 4 | Discrete | 300 | 200.0 |
 | `BipedalWalker-v3` | 24 | 4 | Continuous | 300 | 300.0 |
+| Hummingbird hover | 18 | 4 | Continuous | 300 | 450.0 |
 
 CartPole stays at 100 because it is small and discrete. LunarLander and BipedalWalker use 300 to keep more diversity in harder spaces.
 
