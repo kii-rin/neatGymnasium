@@ -54,7 +54,7 @@ python3 evolve-feedforward.py
 
 Training automatically resumes from the highest numbered `checkpoint-*` when no `winner-feedforward` exists.
 
-### Train the bat glider
+### Train the bat environment
 
 ```bash
 cd bat
@@ -67,12 +67,12 @@ For a quick smoke run:
 python3 evolve-feedforward.py --generations 1
 ```
 
-The bat task combines the first two goals in one environment:
+The bat environment uses 4 normalized inputs and 2 continuous outputs:
 
-1. Stay airborne and stable.
-2. Glide toward a forward waypoint.
-
-It uses 16 normalized inputs and 4 continuous outputs: left wing spread, right wing spread, tail pitch, and flap assist.
+```text
+Inputs:  range_distance, range_change, pitch, roll
+Outputs: left_wing_joint, right_wing_joint
+```
 
 ## Replay or record
 
@@ -104,7 +104,7 @@ scp -P YOUR_PORT 'root@YOUR_HOST:/root/neatGymnasium/bat/videos/*.mp4' .
 | `CartPole-v1` | 4 | 2 | Discrete | 100 | 475.0 |
 | `LunarLander-v3` | 8 | 4 | Discrete | 300 | 200.0 |
 | `BipedalWalker-v3` | 24 | 4 | Continuous | 300 | 300.0 |
-| `BatGliderEnv` | 16 | 4 | Continuous | 300 | 60.0 |
+| `BatGliderEnv` | 4 | 2 | Continuous | 300 | 45.0 |
 
 CartPole stays at 100 because it is small and discrete. LunarLander, BipedalWalker, and BatGlider use 300 to keep more diversity in harder spaces.
 
@@ -121,7 +121,7 @@ BatGlider currently uses:
 
 ```text
 pop_size = 300
-compatibility_threshold = 2.2
+compatibility_threshold = 2.0
 max_stagnation = 25
 species_elitism = 2
 ```
@@ -177,7 +177,7 @@ Plain SSH/tmux does not show GUI windows. Use `cli` replay mode to record videos
 - Removed duplicate `record.py` scripts.
 - Refreshed `template/` scripts.
 - Retuned BipedalWalker config from 100 population / 3.0 threshold to 300 population / 2.0 threshold.
-- Added a simple bat-inspired glider environment with stage 1 survival and stage 2 waypoint rewards.
+- Added a minimal bat environment with 4 inputs and 2 continuous outputs.
 
 ## TODO
 
@@ -186,7 +186,7 @@ Plain SSH/tmux does not show GUI windows. Use `cli` replay mode to record videos
 - Add a PPO or SAC baseline for comparison against NEAT.
 - Add CI checks for formatting and import errors.
 - Add a license file.
-- Add later bat stages: landing/perching, obstacles, wing damage, and stronger wind randomization.
+- Add later bat stages after the minimal environment is working.
 
 ## License
 
