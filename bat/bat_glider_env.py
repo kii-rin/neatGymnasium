@@ -1,8 +1,14 @@
-"""Simple Gymnasium bat-glider environment for NEAT experiments.
+"""Simple Gymnasium bat-flapper environment for NEAT experiments.
 
-The goal is intentionally not full bat aerodynamics. It is a lightweight
-stage-1/2 simulator: stay airborne, then glide toward a forward waypoint.
-Actions are continuous controls inspired by a bat/glider body.
+This environment models the user's intended first hardware target:
+
+- one sonar-style distance sensor
+- pitch and roll attitude feedback
+- one constant mechanical flapper that supplies base lift
+- one scissor-like joint per wing
+
+The NEAT policy only controls left and right wing joints. It does not get exact
+position, target coordinates, yaw, or simulator-only state.
 """
 
 from __future__ import annotations
@@ -22,29 +28,30 @@ class BatGliderConfig:
     dt: float = 0.05
     gravity: float = 9.81
     mass: float = 1.0
-    max_speed: float = 24.0
-    target_distance: float = 35.0
-    target_radius: float = 4.0
+    max_speed: float = 18.0
+    corridor_length: float = 40.0
+    safe_sonar_distance: float = 8.0
+    min_sonar_distance: float = 1.2
     ground_z: float = 0.0
-    start_altitude: float = 12.0
-    wind_randomization: float = 1.0
+    ceiling_z: float = 16.0
+    start_altitude: float = 8.0
+    wind_randomization: float = 0.35
 
 
 class BatGliderEnv(gym.Env):
-    """A small continuous-control bat-like glider task.
+    """A tiny bat/butterfly-like constant-flapper task.
 
-    Observation, 16 floats in roughly [-1, 1]:
-      x, y, z, vx, vy, vz, pitch, roll, yaw, pitch_rate, roll_rate, yaw_rate,
-      target_dx, target_dy, target_dz, last_lift
+    Observation, 4 floats in [-1, 1]:
+      sonar_distance, sonar_change, pitch, roll
 
-    Action, 4 floats in [-1, 1]:
-      left_wing_spread, right_wing_spread, tail_pitch, flap_assist
+    Action, 2 floats in [-1, 1]:
+      left_wing_joint, right_wing_joint
 
-    The reward combines stage 1 and 2:
-      - stay alive and airborne
-      - keep smooth/stable attitude
-      - move toward the forward waypoint
-      - get a success bonus near the target
+    The simulated body has a simple always-on flapping lift source. The policy
+    changes the opening of each one-piece wing through a single joint per wing.
+    Opening both wings increases lift and drag. Asymmetry between wing joints
+    controls roll/turning. The sonar points forward and measures distance to a
+    wall/goal plane ahead; the network does not see exact world position.
     """
 
     metadata = {"render_modes": ["rgb_array"], "render_fps": 20}
@@ -52,105 +59,114 @@ class BatGliderEnv(gym.Env):
     def __init__(self, render_mode: str | None = None, config: BatGliderConfig | None = None):
         self.render_mode = render_mode
         self.cfg = config or BatGliderConfig()
-        self.observation_space = spaces.Box(-1.0, 1.0, shape=(16,), dtype=np.float32)
-        self.action_space = spaces.Box(-1.0, 1.0, shape=(4,), dtype=np.float32)
-        self._last_lift = 0.0
+        self.observation_space = spaces.Box(-1.0, 1.0, shape=(4,), dtype=np.float32)
+        self.action_space = spaces.Box(-1.0, 1.0, shape=(2,), dtype=np.float32)
         self.reset()
 
     def reset(self, seed: int | None = None, options: dict[str, Any] | None = None):
         super().reset(seed=seed)
         rng = self.np_random
         self.steps = 0
-        self.pos = np.array([0.0, 0.0, self.cfg.start_altitude], dtype=np.float32)
-        self.vel = np.array([6.0 + rng.uniform(-0.5, 0.5), 0.0, 0.0], dtype=np.float32)
-        self.angles = np.array([rng.uniform(-0.03, 0.03), rng.uniform(-0.03, 0.03), 0.0], dtype=np.float32)
+        self.pos = np.array([0.0, rng.uniform(-0.4, 0.4), self.cfg.start_altitude], dtype=np.float32)
+        self.vel = np.array([4.8 + rng.uniform(-0.25, 0.25), 0.0, rng.uniform(-0.1, 0.1)], dtype=np.float32)
+        # angles = pitch, roll, yaw. Only pitch and roll are observed.
+        self.angles = np.array([rng.uniform(-0.04, 0.04), rng.uniform(-0.04, 0.04), 0.0], dtype=np.float32)
         self.rates = np.zeros(3, dtype=np.float32)
-        self.target = np.array([self.cfg.target_distance, 0.0, self.cfg.start_altitude * 0.65], dtype=np.float32)
         self.wind = rng.uniform(-self.cfg.wind_randomization, self.cfg.wind_randomization, size=3).astype(np.float32)
-        self.wind[2] *= 0.2
-        self._prev_distance = float(np.linalg.norm(self.target - self.pos))
-        self._last_lift = 0.0
+        self.wind[2] *= 0.25
+        self._prev_sonar = self._sonar_distance()
         return self._obs(), {}
 
     def step(self, action):
         action = np.clip(np.asarray(action, dtype=np.float32), -1.0, 1.0)
-        left, right, tail, flap = action
+        left_joint, right_joint = action
         dt = self.cfg.dt
         self.steps += 1
 
-        left_area = 0.55 + 0.45 * ((left + 1.0) * 0.5)
-        right_area = 0.55 + 0.45 * ((right + 1.0) * 0.5)
-        wing_area = left_area + right_area
-        asymmetry = right_area - left_area
-        air_vel = self.vel - self.wind
-        speed = max(0.1, float(np.linalg.norm(air_vel)))
+        # Joint value -1 means more folded, +1 means more open.
+        left_open = 0.25 + 0.75 * ((left_joint + 1.0) * 0.5)
+        right_open = 0.25 + 0.75 * ((right_joint + 1.0) * 0.5)
+        wing_open = left_open + right_open
+        asymmetry = right_open - left_open
 
         pitch, roll, yaw = self.angles
-        lift = 0.034 * wing_area * speed * speed * max(0.15, math.cos(abs(roll)))
-        flap_lift = 0.45 * ((flap + 1.0) * 0.5) * wing_area
-        drag = 0.012 * wing_area * speed * speed
-        self._last_lift = lift + flap_lift
-
+        air_vel = self.vel - self.wind
+        speed = max(0.1, float(np.linalg.norm(air_vel)))
         forward = np.array([math.cos(yaw), math.sin(yaw), math.sin(pitch)], dtype=np.float32)
         forward /= max(1e-6, np.linalg.norm(forward))
-        drag_vec = -drag * air_vel / speed
-        force = np.array([0.0, 0.0, lift + flap_lift - self.cfg.gravity * self.cfg.mass], dtype=np.float32)
-        force += drag_vec.astype(np.float32)
-        force += 0.09 * speed * forward
+
+        # Constant-flapper approximation: a simple base lift/drive source whose
+        # effectiveness changes with wing opening and body stability.
+        stability_factor = max(0.2, math.cos(abs(pitch)) * math.cos(abs(roll)))
+        base_lift = 4.9 * wing_open * stability_factor
+        glide_lift = 0.018 * wing_open * speed * speed * stability_factor
+        drag = 0.022 * wing_open * speed * speed
+        drive = 0.42 * wing_open * stability_factor
+
+        force = np.array([0.0, 0.0, base_lift + glide_lift - self.cfg.gravity * self.cfg.mass], dtype=np.float32)
+        force += (-drag * air_vel / speed).astype(np.float32)
+        force += drive * forward
 
         self.vel += (force / self.cfg.mass) * dt
         self.vel = np.clip(self.vel, -self.cfg.max_speed, self.cfg.max_speed)
         self.pos += self.vel * dt
 
-        # Attitude dynamics: wing asymmetry rolls/yaws, tail controls pitch.
-        self.rates[0] += (0.9 * tail - 0.35 * self.rates[0] - 0.08 * pitch) * dt
-        self.rates[1] += (1.2 * asymmetry - 0.45 * self.rates[1] - 0.12 * roll) * dt
-        self.rates[2] += (0.45 * asymmetry + 0.18 * roll - 0.35 * self.rates[2]) * dt
+        # One joint per wing: asymmetric opening rolls and slowly yaws the body.
+        # Both wings similarly open/closed mostly affect lift/drag, not pitch.
+        average_open = 0.5 * wing_open
+        self.rates[0] += (0.18 * (average_open - 1.15) - 0.35 * self.rates[0] - 0.10 * pitch) * dt
+        self.rates[1] += (1.45 * asymmetry - 0.55 * self.rates[1] - 0.18 * roll) * dt
+        self.rates[2] += (0.35 * asymmetry + 0.16 * roll - 0.45 * self.rates[2]) * dt
         self.angles += self.rates * dt
-        self.angles = np.clip(self.angles, [-0.9, -1.1, -math.pi], [0.9, 1.1, math.pi]).astype(np.float32)
+        self.angles = np.clip(self.angles, [-0.9, -1.05, -math.pi], [0.9, 1.05, math.pi]).astype(np.float32)
 
-        distance = float(np.linalg.norm(self.target - self.pos))
-        progress = self._prev_distance - distance
-        self._prev_distance = distance
+        sonar = self._sonar_distance()
+        sonar_change = self._prev_sonar - sonar
+        self._prev_sonar = sonar
 
-        stable = 1.0 - min(1.0, (abs(self.angles[0]) + abs(self.angles[1])) / 1.4)
-        alive = self.pos[2] > self.cfg.ground_z and abs(self.angles[1]) < 1.05
-        reached = distance < self.cfg.target_radius
-        crashed = not alive
+        stable = 1.0 - min(1.0, (abs(self.angles[0]) + abs(self.angles[1])) / 1.25)
+        altitude_ok = self.cfg.ground_z < self.pos[2] < self.cfg.ceiling_z
+        attitude_ok = abs(self.angles[0]) < 0.85 and abs(self.angles[1]) < 0.95
+        too_close = sonar < self.cfg.min_sonar_distance
+        reached_sound_wall = sonar < self.cfg.safe_sonar_distance and altitude_ok and attitude_ok
+        crashed = not altitude_ok or not attitude_ok or too_close
         truncated = self.steps >= self.cfg.max_steps
-        terminated = bool(reached or crashed)
+        terminated = bool(reached_sound_wall or crashed)
 
-        reward = 0.03                    # stage 1: stay alive
-        reward += 1.5 * progress          # stage 2: move toward waypoint
-        reward += 0.03 * stable
-        reward -= 0.002 * float(np.linalg.norm(self.rates))
-        reward -= 0.001 * abs(float(action[3]))
-        if reached:
-            reward += 25.0
+        reward = 0.035                        # stage 1: stay alive
+        reward += 0.04 * stable               # stay level using pitch/roll
+        reward += 0.15 * float(sonar_change)  # stage 2: get closer by sonar
+        reward -= 0.0015 * float(np.linalg.norm(self.rates))
+        reward -= 0.001 * abs(float(asymmetry))
+        if reached_sound_wall:
+            reward += 20.0
         if crashed:
             reward -= 15.0
 
-        return self._obs(), float(reward), terminated, truncated, {"distance": distance, "reached": reached}
+        info = {
+            "sonar_distance": float(sonar),
+            "sonar_change": float(sonar_change),
+            "reached": bool(reached_sound_wall),
+            "crashed": bool(crashed),
+        }
+        return self._obs(), float(reward), terminated, truncated, info
+
+    def _sonar_distance(self) -> float:
+        # Forward sonar distance to a simple wall/goal plane at corridor_length.
+        # This intentionally acts like a one-dimensional range sensor rather
+        # than exact x/y/z state.
+        remaining = self.cfg.corridor_length - float(self.pos[0])
+        return max(0.0, remaining)
 
     def _obs(self):
-        delta = self.target - self.pos
+        sonar = self._sonar_distance()
+        sonar_norm = (sonar / self.cfg.corridor_length) * 2.0 - 1.0
+        sonar_change = np.clip((self._prev_sonar - sonar) / 1.2, -1.0, 1.0)
         vals = np.array([
-            self.pos[0] / self.cfg.target_distance,
-            self.pos[1] / 20.0,
-            self.pos[2] / 20.0,
-            self.vel[0] / self.cfg.max_speed,
-            self.vel[1] / self.cfg.max_speed,
-            self.vel[2] / self.cfg.max_speed,
+            sonar_norm,
+            sonar_change,
             self.angles[0] / 0.9,
-            self.angles[1] / 1.1,
-            self.angles[2] / math.pi,
-            self.rates[0] / 4.0,
-            self.rates[1] / 4.0,
-            self.rates[2] / 4.0,
-            delta[0] / self.cfg.target_distance,
-            delta[1] / 20.0,
-            delta[2] / 20.0,
-            self._last_lift / 18.0,
+            self.angles[1] / 1.05,
         ], dtype=np.float32)
         return np.clip(vals, -1.0, 1.0)
 
@@ -161,15 +177,15 @@ class BatGliderEnv(gym.Env):
         img[ground:, :, :] = np.array([210, 230, 210], dtype=np.uint8)
 
         def world_to_px(p):
-            x = int(60 + (p[0] / max(1.0, self.cfg.target_distance + 10.0)) * (width - 120))
-            y = int(ground - p[2] * 11)
+            x = int(50 + (p[0] / max(1.0, self.cfg.corridor_length)) * (width - 100))
+            y = int(ground - p[2] * 13)
             return np.clip(x, 0, width - 1), np.clip(y, 0, height - 1)
 
-        tx, ty = world_to_px(self.target)
+        wall_x, _ = world_to_px([self.cfg.corridor_length, 0.0, 0.0])
+        img[:, max(0, wall_x - 2):min(width, wall_x + 3)] = [120, 190, 120]
         bx, by = world_to_px(self.pos)
-        img[max(0, ty - 6):min(height, ty + 7), max(0, tx - 6):min(width, tx + 7)] = [50, 180, 80]
-        img[max(0, by - 4):min(height, by + 5), max(0, bx - 10):min(width, bx + 11)] = [40, 40, 40]
-        img[max(0, by - 2):min(height, by + 3), max(0, bx - 25):min(width, bx + 26)] = [90, 70, 120]
+        img[max(0, by - 4):min(height, by + 5), max(0, bx - 8):min(width, bx + 9)] = [35, 35, 35]
+        img[max(0, by - 2):min(height, by + 3), max(0, bx - 24):min(width, bx + 25)] = [90, 70, 120]
         return img
 
     def close(self):
@@ -181,7 +197,7 @@ if __name__ == "__main__":
     obs, _ = env.reset(seed=0)
     total = 0.0
     for _ in range(120):
-        obs, reward, terminated, truncated, info = env.step([0.7, 0.7, 0.05, -0.2])
+        obs, reward, terminated, truncated, info = env.step([0.4, 0.4])
         total += reward
         if terminated or truncated:
             break
