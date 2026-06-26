@@ -1,0 +1,66 @@
+name: Bat Smoke
+
+on:
+  pull_request:
+    paths:
+      - 'bat/**'
+      - '.github/workflows/bat-smoke.yml'
+      - 'requirements.txt'
+  workflow_dispatch:
+
+jobs:
+  bat-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Check environment basics
+        run: |
+          cd bat
+          python bat_glider_env.py
+          python - <<'PY'
+          import numpy as np
+          from bat_glider_env import BatGliderEnv
+
+          env = BatGliderEnv(render_mode='rgb_array')
+          obs, info = env.reset(seed=123)
+          print('obs_shape', obs.shape)
+          print('action_shape', env.action_space.shape)
+          assert obs.shape == (4,), obs.shape
+          assert env.action_space.shape == (2,), env.action_space.shape
+          total = 0.0
+          for step in range(25):
+              obs, reward, terminated, truncated, info = env.step(np.array([0.25, 0.25], dtype=np.float32))
+              total += reward
+              if terminated or truncated:
+                  break
+          frame = env.render()
+          print('rollout_steps', step + 1)
+          print('rollout_reward', round(total, 4))
+          print('last_info', info)
+          print('frame_shape', frame.shape)
+          assert frame.shape == (360, 640, 3), frame.shape
+          PY
+
+      - name: Run one NEAT generation
+        run: |
+          cd bat
+          python evolve-feedforward.py --generations 1
+          test -f winner-feedforward
+          ls -lh winner-feedforward
+
+      - name: Replay checkpoint or winner
+        run: |
+          cd bat
+          printf 'cli\n' | python replay.py
+          ls -lh videos/
