@@ -1,5 +1,5 @@
 gymnasium[box2d]
-neat-python
+neat-python==0.92
 numpy
 moviepy
 psutil
